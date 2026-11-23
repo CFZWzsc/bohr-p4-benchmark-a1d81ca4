@@ -7,67 +7,78 @@ description: Use when a literature-reading evaluation workorder must be scored i
 
 ## 用途与适用条件
 
-读取评测工作单、参考答案与候选输出，按确定性规则逐题打分，汇总总分、分类与智能体维度，并输出失败原因和版本快照。
+读取评测工作单、参考答案、候选输出与运行条件，按确定性规则逐题打分，汇总总分、分类与智能体维度，输出失败原因和版本快照；每个分数都能顺着 `item_id` 追到候选输出、判定理由、评分规则与案例哈希。
 
-适用条件：任务提供 `/input/case.json`（或 `--case` 指定的等价案例文件），按需提供 `/input/task.md` 和同目录的配套 JSON/文本/PDF/DOCX/XLSX 材料，要求把结构化、可复核的结果写入 `/app/output/result.json`。输入包含 `evaluation-workorder.json`/`items`，每项有题目、参考答案与一个或多个候选输出。
+适用：`/input/case.json`（或 `--case` 指定），可带 `/input/task.md` 与同目录工作单（`evaluation-workorder.json`、`workorder.json`、`benchmark-items.json`）。输入含 `items`/`tasks`/`benchmark_items`/`evaluation_items`，每项有题目、参考答案与一个或多个候选输出。
 
-不适用：不调用外部模型重新生成答案；不修改评分标准；不在没有候选项时伪造分数。
+不适用：不调用外部模型重新生成答案；不修改评分标准；没有候选项时不给分。
 
 ## 输入
 
-- 主输入 `/input/case.json`：读取其中真实的段落、题录、字段表、工作单或查询；不根据文件名、标题或领域标签补造内容。
-- 任务说明 `/input/task.md`：存在时优先作为任务语义依据；缺失时仅使用 `case.json` 中的显式字段。
-- 配套材料：`comparison-workorder.json`、`target-fields.json`、`claims-to-verify.json`、`corpus-manifest.json`、`material.json`、`evaluation-workorder.json` 等按题目约定从 `/input` 与案例文件所在目录读取，文件名与解析结果写入输出的 `coverage`/`result`。
-- 支持标准库可直接读取的 TXT/MD/CSV/TSV/JSON/BibTeX/RIS/XML/HTML，以及 DOCX/PPTX/XLSX（解包 XML）与 PDF（最小流解析）；扫描件或无文本层文件只登记状态，不伪装成已读。
-- 路径解析顺序为 `/input`、案例文件所在目录、当前工作目录、`/app`；找不到的路径写入 `errors` 或 `uncertainty`，不静默替换。
-- 仅依赖 CPython 3.9+ 标准库；不联网、不读取环境变量中的令牌、不修改 `/input`，只写 `--out` 与 `--work`。
+- 主输入 `/input/case.json`：只读取其中真实的题目、参考答案与候选输出，不根据文件名、标题或领域标签补造内容。
+- 任务说明 `/input/task.md`：存在时作为任务语义依据；缺失时仅使用 `case.json` 的显式字段。
+- 配套材料从 `/input` 与案例文件同目录读取，成功读取的文件名记入 `result.version.workorder_refs`，解析失败记入 `errors`。
+- 路径解析顺序：`/input` → 案例目录 → 当前目录 → `/app`；找不到的路径写入 `errors`/`uncertainty`，不静默替换。
+- 支持 TXT/MD/CSV/TSV/JSON/BibTeX/RIS/XML/HTML、DOCX/PPTX/XLSX（解包 XML）与 PDF（最小流解析）；无文本层文件只登记状态。
+- 仅用 CPython 3.9+ 标准库；不联网、不读取环境变量中的令牌、不修改 `/input`，只写 `--out` 与 `--work`。
 
 ## 处理流程
 
-1. **读取工作单**：解析题目、类别、参考答案、必含词、满分与候选输出；记录文件哈希。
-2. **输出规范化**：统一大小写、空白与标点，保留原始输出用于复核。
-3. **规则评分**：空输出或拒答记 0；规范化完全相等记满分；否则按必含词比例与词元 F1（0.80/0.45 阈值）给 0/1/2。
+1. **读取工作单**：解析题目、类别、参考答案、必含词、满分与候选输出；记录案例哈希。
+2. **输出规范化**：统一大小写、空白与标点；保留原始输出用于复核。
+3. **规则评分**：空输出或拒答记 0；规范化完全相等记满分；否则按必含词比例与词元 F1（阈值 0.80 / 0.45）给 0/1/2。
 4. **逐项取证**：每个分数附参考摘要、候选摘要与判定理由；参考答案缺失时标 `not_run`，不给分。
-5. **汇总统计**：计算总分、均分、归一化分数，并按类别与智能体分组。
-6. **失败分析**：记录未满分项的原因分类与缺失词。
-7. **契约落盘**：保留 `case_id` 与契约字段，输出确定性版本快照。
-
-## 评分维度对应
-
-- **评分一致**：同一输入重复运行分数完全一致，阈值与规则可复算。
-- **逐项可查**：每题有分数、满分、理由与参考/候选摘要。
-- **汇总正确**：总分、均分与分组统计与逐项分数一致。
-- **失败可用**：未满分项给出可操作的失败原因。
+5. **汇总统计**：总分、均分、归一化分数，按类别与智能体分组。
+6. **失败分析**：未满分项给出原因分类与缺失词。
+7. **契约落盘**：保留 `case_id` 与全部契约字段，输出确定性版本快照。
 
 ## 输出契约
 
 写入 `/app/output/result.json`（UTF-8 JSON，确定性排序，无随机、无时间戳）。顶层必须保留：
 
-- 输入 `case_id`（缺失时为 `null`）；
-- 输入 `output_contract` 声明的每一个字段名，原样保留；本 Skill 无法确定性映射的字段写 `null`，并在 `contract_notes` 说明原因，绝不编造；
+- `case_id`：与输入完全一致（缺失时为 `null`）；
+- 输入 `output_contract` 声明的每一个字段名，原样保留；无法确定性映射的写 `null`，并在 `contract_notes` 说明原因；
 - `status`：`success` / `partial` / `insufficient_input` / `failed`；
-- `result`：完整结构化交付，避免契约字段映射丢失信息；
-- `evidence`：可回到段落/文件/定位的证据列表；
-- `uncertainty`：缺口、未读材料与不可判定项；
-- `errors`：结构化错误或缺失路径；
-- `stats`：计数、覆盖率与处理统计；
-- `skill`、`challenge_id`。
+- `result`、`evidence`、`uncertainty`、`errors`、`stats`、`contract_notes`、`skill`、`challenge_id`。
 
-主要交付段：`result.items`、`result.scores`、`result.summary`、`result.failures`、`result.version`。
+主要交付段与必填子字段：
 
-字段名以实际 `output_contract` 为准；本 Skill 不删除、不改名、不放宽契约字段。
+| 段 | 必填内容 |
+|---|---|
+| `result.items[]` | `item_id`、`agent`、`score`、`max_score`、`reason`、`output_excerpt`、`reference_excerpt`、`task`；调用 Agent 追加 `locator`（来源文件 + 段落/行/表行列） |
+| `result.scores` | `item_id`、`agent`、`score`、`max_score` |
+| `result.summary` | `items`、`scored_outputs`、`not_run`、`score_sum`、`score_max`、`mean_score`、`normalised`、`by_agent`、`by_category` |
+| `result.failures` | 未满分项的 `item_id`、`agent`、`score`、`max_score`、`reason` |
+| `result.version` | `workorder_refs`、`case_sha256`、`scoring_policy`、`deterministic` |
+| `evidence[]` | 每条含 `item_id`、`locator`、`quote`、`role`；缺定位依据的标 `anchor_status: unverified`，不得写成已核验 |
+| `needs_human_confirmation[]` | `item`、`locator`、`reason`：缺参考答案、候选为空、规则无法判定时逐条登记 |
 
-## 异常处理
+字段名以实际 `output_contract` 为准；不删除、不改名、不放宽契约字段。
+
+## 交付成品要求
+
+1. **交付成品而不是流程说明**：脚本只产出评分骨架，调用 Agent 必须在同一 `result.json` 中补齐全部条目的 `locator`、失败归因与 `needs_human_confirmation`；禁止 `pending`、`TODO` 或空交付段。
+2. **覆盖全部输入条目**：每个题目、候选项与智能体都要有对应行，不得只处理首条；确实无法评分的写明原因，不静默跳过。
+3. **自检**：`case_id` 与输入一致；`output_contract` 每字段存在或 `null`+`contract_notes`；`status` 取上述枚举；总分、均分与逐项分数自洽；重复运行结果完全相同。
+4. **参数等价**：`--out` 与 `--output` 等价；默认 `/input/case.json` → `/app/output/result.json`。
+5. **由输入驱动**：不针对单一示例硬编码；字段命名差异走别名匹配，并在 `uncertainty` 记录假设。
+
+## 分数口径
+
+输出的是本 Skill 的规则自评分，不是平台、DSH 或官方案例得分；技术性合成检查日志也不是独立语义验证。不得写入编造的分数、名次或评审结论。
+
+## 异常与降级
 
 | 情况 | 处理 | 输出表现 |
 |---|---|---|
-| `case.json` 缺失或不是合法 JSON | 不改写输入；写入结构化失败结果 | 退出码 `2`，`status` 为 `insufficient_input`（解析错误为 `failed`），`errors` 记录原因 |
-| 配套工作单/字段表缺失 | 继续处理可用材料，不猜测清单 | `errors` 记录缺失文件，相关段为空并说明 |
-| PDF 无文本层、文件损坏或无权限 | 登记文件状态，跳过该文件，继续其余材料 | `read_status`、`uncertainty` 明确标注 |
-| 段落/字段/公式/指标找不到 | 保留空值，不推断 | 对应条目 `status` 为 `not_reported`/`insufficient_evidence`，`uncertainty` 说明 |
-| 多个来源数值冲突 | 保留全部候选值与定位，不做平均或择一 | 标记 `source_conflict`/`conflict`，`evidence` 给出两处定位 |
-| 输入只有单一文献却要求多文献比较 | 不伪造第二篇文献 | `status: partial`，明确说明无法构成多文档比较 |
-| 运行异常 | 捕获并输出结构化失败，不假装成功 | `status: failed`，`errors` 含异常类型 |
+| `case.json` 缺失或非法 JSON | 不改写输入，写出结构化失败结果 | `status: insufficient_input`（解析错误为 `failed`），`errors` 记原因 |
+| 工作单/字段表缺失 | 继续处理可用材料，不猜测清单 | `errors` 记录缺失文件，相关段为空并说明 |
+| 条目无参考答案 | 该条记 `not_run`，不给分 | `score: null`，`needs_human_confirmation` 登记 |
+| 条目无候选输出 | 不判分 | `status: partial`，`uncertainty` 说明 |
+| 文件损坏、无文本层或无权限 | 登记状态并跳过，继续其余材料 | `read_status`/`uncertainty` 标注 |
+| 运行异常 | 捕获后输出结构化失败 | `status: failed`，`errors` 含异常类型 |
+
+进程正常结束（含失败分支）退出码恒为 `0`，失败类别只看 `status`，不要用退出码判断成败。
 
 ## 限制
 
@@ -76,10 +87,7 @@ description: Use when a literature-reading evaluation workorder must be scored i
 ## 最小调用示例（示例，非官方案例结果）
 
 ```bash
-python scripts/run_skill.py \
-  --case /input/case.json \
-  --out /app/output/result.json \
-  --work /app/work
+python scripts/run_skill.py --case /input/case.json --out /app/output/result.json --work /app/work
 ```
 
 示意输入（合成，仅演示接口）：
@@ -96,38 +104,7 @@ python scripts/run_skill.py \
 
 ## 自查清单
 
-- [ ] `case_id` 与输入完全一致；`output_contract` 每个字段都存在，或明确记为 `null` 并写入 `contract_notes`。
-- [ ] 每条结论/实体/字段都能回到 `evidence` 中的来源与段落定位；没有编造作者、年份、DOI、页码或引文。
-- [ ] 未读、损坏、缺失、冲突与空结果都已登记，未写成“全部完成”。
-- [ ] 重复运行产生相同结果；未联网、未修改 `/input`。
-
-
-## 交付保证与评分对齐
-
-调用顺序（固定）：
-
-1. 先运行包内脚本（若存在）：`python scripts/run_skill.py`（默认读 `/input/case.json`，写 `/app/output/result.json`）；路径不同时用 `--case` / `--output` 指定。
-2. 再完成脚本无法自动完成的实质工作（译文、论述、图表、修订、结论等），把结果写回 `result.json` 对应字段。
-3. 最后自检：`case_id` 与输入一致；`output_contract` 每个字段都存在；`status` 使用本 Skill 输出契约的枚举（正常完成为 `success`，确实缺输入或存在未解决项为 `partial`，无法作答为 `insufficient_input`，运行异常为 `failed`）；无 `pending` 占位；数字、引用、来源可逐条回溯。
-
-运行保证：
-
-- 输入缺失、JSON 损坏、字段异常、输出目录不存在时，仍须写出结构化 `result.json` 并正常结束，不得崩溃或非零退出。
-- 不联网、不伪造数据、不声称平台评分或官方案例结果。
-- 交付物必须是可直接编辑与复核的成品，而不是流程说明。
-
-评分对齐（本题五个维度）：
-
-- 实际效果（40）：完整产出任务要求的最终成品，覆盖全部输入条目，可直接进入修改流程。
-- 使用增益（25）：体现相对基础 Agent 的可验证改进（结构化、术语/数字/引用核对、可编辑性）。
-- 创新增益（15）：保留方法学增量（分块、对齐、二次校验、版本比对等），并用结果证明其价值。
-- 可靠体验（10）：异常输入有明确降级与说明，不同长度/文体/重复运行下稳定产出。
-- 生态贡献（10）：用途、调用、输入输出、限制、示例、维护信息齐全，资源可被他人复用。
-
-## 最终交付强制要求
-
-1. **调用 Agent 必须交付成品，不是流程说明**：脚本产出只是索引、核对或规格骨架；调用 Agent 必须在同一 `result.json` 中补齐本题要求的最终产物（正文/译文/审稿意见/综述/分析结论/图表源文件与导出件/幻灯片页内容与讲稿/实验方案等）。交付字段为空、只有标题骨架，或含 `pending`、`TODO` 之类占位，一律视为未完成。
-2. **必须覆盖全部输入条目**：输入中的每个章节、问题、文献、图、页面、指标都要有对应条目，不得只处理示例或首条；确实缺失的条目写入 `uncertainty` / `limitations` 并说明原因，不得静默跳过。
-3. **必须自检后再交付**：`case_id` 与输入一致；`output_contract` 每个字段都存在；状态值取本题契约规定的枚举；数字、单位、引用、来源可逐条回溯；结果内部无自相矛盾。
-4. **参数等价**：`python scripts/run_skill.py --case <输入> --out <输出>` 与 `--output <输出>` 等价；默认 `/input/case.json` → `/app/output/result.json`。
-5. **平台用 3 个固定案例分别运行**：逻辑要由输入驱动，不针对某一份示例硬编码；字段命名差异走别名匹配与显式降级，并在 `uncertainty` 记录假设。
+- [ ] `case_id` 与输入一致；`output_contract` 每个字段都存在，或记为 `null` 并写入 `contract_notes`。
+- [ ] 每个分数都能由 `item_id` 追到候选输出摘要、`reason`、`case_sha256` 与 `scoring_policy`。
+- [ ] 缺参考答案、空输出、损坏文件、冲突数值与未报告项均已登记，未写成“全部完成”。
+- [ ] 重复运行结果相同；未联网、未修改 `/input`；未声称平台评分。
